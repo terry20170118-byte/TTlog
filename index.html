@@ -253,6 +253,7 @@ img,video,canvas{display:block;max-width:100%}
         <span class="tr mono" id="hRef"></span>
         <span class="bl mono" id="hMode">BURST</span>
         <span class="br mono" id="hRes"></span>
+        <span class="br mono" id="hCam" style="bottom:28px">○ CAM OFF</span>
       </div>
       <div class="say" id="say">셔터를 누르면 20장이 담깁니다</div>
       <div class="tick" id="tickN" hidden><b>3</b></div>
@@ -404,6 +405,7 @@ async function openCam(){
       "<br><br>주소가 <code>https://</code> 나 <code>localhost</code> 로 시작해야 합니다."+
       envLine()); return;
   }
+  setCam("wait");
   try{
     if(stream) stream.getTracks().forEach(t=>t.stop());
     const v = LENS
@@ -421,10 +423,16 @@ async function openCam(){
     $("#hRes").textContent = (s.width||"?")+"×"+(s.height||"?");
     CAPS.res = (s.width||"?")+"×"+(s.height||"?");
     setupTorch(); setupZoom(); await listLenses(); keepAwake();
+    setCam("live"); LASTERR="";
+    track.onended = ()=>{ setCam("off");
+      fail("카메라가 끊겼습니다","다른 앱이 카메라를 가져갔거나 화면을 나갔다 왔습니다."); };
+    track.onmute = ()=> setCam("off");
+    track.onunmute = ()=> setCam("live");
     locked=false; $("#bLock").setAttribute("aria-pressed","false");
     probe();
   }catch(e){
     const nm = e && e.name || "";
+    LASTERR = nm + (e && e.message ? " — "+e.message : "");
     if(nm==="NotAllowedError")
       fail("카메라를 쓸 수 없습니다",
         "브라우저가 카메라를 막았습니다. 둘 중 하나입니다."+
@@ -437,10 +445,25 @@ async function openCam(){
       fail("카메라를 열지 못했습니다", (nm||"알 수 없는 오류")+" — 다른 앱이 쓰고 있지 않은지 보세요.");
   }
 }
+let LASTERR="";
 function fail(t,p){
   const g=$("#gate"); g.hidden=false;
-  $("#gateT").textContent=t; $("#gateP").innerHTML=p;
+  $("#gateT").textContent=t;
+  $("#gateP").innerHTML = p +
+    (LASTERR ? "<p style='font-size:11px;color:#E8907F;margin-top:12px'><span class='mono'>"+
+      LASTERR+"</span></p>" : "");
   $("#gateB").textContent="다시 시도";
+  setCam("off");
+}
+/* 카메라가 지금 살아 있는지 늘 보이게 */
+function setCam(st){
+  const el=$("#hCam"); if(!el) return;
+  el.textContent = st==="live" ? "● CAM" : st==="wait" ? "○ 여는 중" : "○ CAM OFF";
+  el.className = "br mono" + (st==="live" ? " lock" : "");
+}
+function camLive(){
+  return !!(track && track.readyState==="live" && !track.muted
+            && vid.videoWidth>0 && vid.videoHeight>0);
 }
 
 /* ═══ 렌즈 · 줌 ═══
@@ -492,8 +515,11 @@ async function keepAwake(){
   }catch(e){ CAPS.wake=false; }
 }
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState==="visible" && !wake) keepAwake();
-  else if(document.visibilityState!=="visible") wake=null;
+  if(document.visibilityState==="visible"){
+    if(!wake) keepAwake();
+    /* 앱을 나갔다 오면 안드로이드가 카메라를 끊는다 — 조용히 다시 연다 */
+    if(!camLive() && $("#gate").hidden) openCam();
+  } else { wake=null; }
 });
 
 /* 이 기기가 무엇을 해주는지 미리 알아둔다 */
@@ -593,6 +619,7 @@ function grab(){
            thumb: cvs.toDataURL("image/jpeg",0.7) };
 }
 function push(){
+  if(!camLive()) return false;
   const g=grab(); if(!g) return false;
   FRAMES.push(g.full); THUMBS.push(g.thumb);
   return true;
@@ -680,7 +707,8 @@ function showGhost(){
 
 /* ═══ 연사 ═══ */
 async function runBurst(){
-  if(busy || !track) return;
+  if(busy) return;
+  if(!camLive()){ toast("카메라가 꺼져 있습니다"); return; }
   busy=true; FRAMES=[]; THUMBS=[];
   $("#shut").classList.add("rec");
   for(let i=0;i<BURST_N;i++){
@@ -1081,8 +1109,8 @@ $("#bDone").onclick=openRev;
 $("#bHelp").onclick=()=>help(MODE);
 
 setMode("burst");
-/* 사파리는 사용자가 누르기 전에는 카메라를 열지 않는다 — 버튼으로 시작 */
-openCam();
+/* 자동으로 열지 않는다 — 손가락으로 눌러야 크롬이 권한을 제대로 묻는다 */
+setCam("off");
 </script>
 </body>
 </html>
